@@ -1,7 +1,5 @@
-import math
 import utime
-import random
-from eg_utils import header, levels, eyes, display
+from eg_utils import display
 
 class state:
     def __init__(self):
@@ -47,9 +45,6 @@ class elliegochi:
             self.dp.eyes.autonomous_events()
             self.dp.render()
 
-elliegochi = elliegochi()
-
-elliegochi.live()
 
 
     
