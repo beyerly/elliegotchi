@@ -1,3 +1,4 @@
+from eg_utils import TIMESTEP
 
 class StateProperty:
     def __init__(self, state, default_value, max_value, wrap=False, timebase = 1):
@@ -72,11 +73,11 @@ class StateAttention(StateProperty):
 
 class State:
     def __init__(self):
-        self.age = StateAge(self,0,1000, False, int(60/TIMESTEP))
-        self.energy = StateEnergy(self,100, 100, False, int(1/TIMESTEP))
-        self.attention = StateAttention(self, 50, 100, False, int(1 / TIMESTEP))
-        self.happiness = StateHappiness(self,50, 100, False, int(1/TIMESTEP))
-        self.arousal = StateArousal(self,50, 100, False, int(1/TIMESTEP))
+        self.age = StateAge(self,0,1000, False, int(60*10/TIMESTEP))
+        self.energy = StateEnergy(self,100, 100, False, int(60*3/TIMESTEP))
+        self.attention = StateAttention(self, 50, 100, False, int(45/TIMESTEP))
+        self.happiness = StateHappiness(self,70, 100, False, int(60/TIMESTEP))
+        self.arousal = StateArousal(self,50, 100, False, int(60*2/TIMESTEP))
         self.headers = {'age' : self.get_age,
                         'energy': self.get_energy,
                         'attention': self.get_attention,

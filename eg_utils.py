@@ -278,28 +278,28 @@ class Voice:
                         step_speed=0,
                         repeat_delay=0.2,
                         duty_cycle=30000,
-                        occurrence=int(1/TIMESTEP))
+                        occurrence=int(10/TIMESTEP))
         joy = Mood(repeat_range=[4, 7],
                      pitch_range=[1500, 3000],
                      pitch_step=1,
                      step_speed=0.0001,
                      repeat_delay=0.2,
                      duty_cycle=20000,
-                     occurrence=int(7/TIMESTEP))
+                     occurrence=int(60*2/TIMESTEP))
         content = Mood(repeat_range=[1, 3],
                      pitch_range=[300, 1000],
                      pitch_step=-1,
                      step_speed=0.001,
                      repeat_delay=0.5,
                      duty_cycle=5000,
-                     occurrence=int(10/TIMESTEP))
+                     occurrence=int(60*5/TIMESTEP))
         depressed = Mood(repeat_range=[4, 7],
                      pitch_range=[300, 800],
                      pitch_step=-1,
                      step_speed=0.001,
                      repeat_delay=0.2,
                      duty_cycle=10000,
-                     occurrence=int(10/TIMESTEP))
+                     occurrence=int(60/TIMESTEP))
         self.moods = {'angry': angry,
                       'joy': joy,
                       'content': content,
@@ -351,4 +351,86 @@ class Voice:
                     utime.sleep(self.moods[self.mood].step_speed)
                 self.buzzer_off()
                 utime.sleep(self.moods[self.mood].repeat_delay)
+
+
+class RgbColor:
+    def __init__(self, pin):
+        self.max_duty = 66000
+        self.min_duty = 50000
+        self.range = self.max_duty - self.min_duty
+        self.freq = 1000
+        self.max_value = 255
+        self.pin = machine.PWM(machine.Pin(pin))
+        self.on()
+
+    def on(self):
+        self.pin.freq(self.freq)
+
+    def set_value(self, value):
+        self.pin.duty_u16(self.max_duty - int(self.range*value/self.max_value))
+
+
+class ColorMap:
+    def __init__(self):
+        self.max_rgb = 255
+        red = 1.7 * math.pi
+        self.rgb = [red]
+        for i in range(2):
+            rad = self.rgb[-1] + 2 * math.pi/3
+            if rad > 2 * math.pi:
+                rad -= 2 * math.pi
+            self.rgb.append(rad)
+
+    def get_color(self, rad):
+        rgb_out = []
+        for i in self.rgb:
+            # Normalize: 0 rad is the center for color
+            rad_norm = rad - i
+            if rad_norm < 0:
+                rad_norm += 2 * math.pi
+            # Split circle in 2 halves
+            if rad_norm > math.pi:
+                rad_norm = -1 * rad_norm + 2 * math.pi
+            # Invert
+            rad_norm = math.pi - rad_norm
+            rgb_out.append(int(self.max_rgb * rad_norm/math.pi))
+        return rgb_out
+
+class Nose:
+    def __init__(self, gp):
+        self.rgb_led = []
+        for i in range(3):
+            self.rgb_led.append(RgbColor(gp + i))
+        self.color_map = ColorMap()
+
+    def diagnostics(self):
+        self.rgb_to_color([0,0,0])
+        for deg in range(360):
+            rad = 2 * math.pi * deg/360
+            rgb = self.color_map.get_color(rad)
+            print(rgb)
+            self.rgb_to_color(rgb)
+            utime.sleep(0.01)
+
+    def rgb_to_color(self, rgb):
+        for i in range(3):
+            self.rgb_led[i].set_value(rgb[i])
+
+    def cartesian_to_angle(self, x, y):
+        angle = math.atan2(x, y)
+        if angle < 0:
+            angle += 2 * math.pi
+        return angle
+
+    def cartesian_to_color(self, x, y):
+        angle = self.cartesian_to_angle(x, y)
+        rgb = self.color_map.get_color(angle)
+        self.rgb_to_color(rgb)
+
+    def update(self, state):
+        # map to pos/neg coordinates: normalize to max/2
+        x = state.happiness.value - int(state.happiness.max/2)
+        y = state.arousal.value - int(state.arousal.max/2)
+        self.cartesian_to_color(x, y)
+
 
