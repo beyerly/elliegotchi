@@ -3,7 +3,6 @@ import math
 import utime
 import random
 import machine
-from machine import Pin, I2C
 from ssd1306 import SSD1306_I2C
 
 TIMESTEP = 0.1
@@ -29,6 +28,8 @@ class Eyes(Frame):
         self.eye_radius_x = 20
         self.eye_radius_y = 20
         self.eyebrow_angle = 0 # 0 is flat, 10 is sad angle, -10 is angry angle
+        self.eyebrow_height = 5
+        self.glabella = 5
         self.dead_eye_size = 10
         self.eye_distance = 40
         self.pupil_radius = 5
@@ -58,23 +59,23 @@ class Eyes(Frame):
 
     def render_eyebrows(self, draw):
         self.fb.line(self.pos[0] - self.eye_radius_x,
-                     self.pos[1] - self.eye_radius_y + self.eyebrow_angle,
-                     self.pos[0] + self.eye_radius_x,
-                     self.pos[1] - self.eye_radius_y - self.eyebrow_angle,
+                     self.pos[1] - self.eyebrow_height - self.eye_radius_y + self.eyebrow_angle,
+                     self.pos[0] + self.eye_radius_x - self.glabella,
+                     self.pos[1] - self.eyebrow_height - self.eye_radius_y - self.eyebrow_angle,
                      draw)
-        self.fb.line(self.pos[0] + self.eye_distance - self.eye_radius_x,
-                     self.pos[1] - self.eye_radius_y - self.eyebrow_angle,
+        self.fb.line(self.pos[0] + self.eye_distance - self.eye_radius_x + self.glabella,
+                     self.pos[1] - self.eyebrow_height - self.eye_radius_y - self.eyebrow_angle,
                      self.pos[0] + self.eye_distance + self.eye_radius_x,
-                     self.pos[1] - self.eye_radius_y + self.eyebrow_angle,
+                     self.pos[1] - self.eyebrow_height - self.eye_radius_y + self.eyebrow_angle,
                      draw) 
 
     def render_sleep(self, draw):
         self.fb.line(self.pos[0] - self.eye_radius_x,
                      self.pos[1],
-                     self.pos[0] + self.eye_radius_x,
+                     self.pos[0] + self.eye_radius_x - self.glabella,
                      self.pos[1],
                      draw)
-        self.fb.line(self.pos[0] + self.eye_distance - self.eye_radius_x,
+        self.fb.line(self.pos[0] + self.eye_distance - self.eye_radius_x + self.glabella,
                      self.pos[1],
                      self.pos[0] + self.eye_distance + self.eye_radius_x,
                      self.pos[1],
@@ -126,6 +127,8 @@ class Eyes(Frame):
         self.clear()
         if not state.alive:
             self.eyes_state = 'dead'
+        if state.asleep:
+            self.eyes_state = 'sleep'
         # Eyes more open with mor arousal
         self.eye_radius_y = 10 + int(10*(state.arousal.value/state.arousal.max))
         # If in sad/angry quadrant, set eyebrow angle
@@ -141,7 +144,10 @@ class Eyes(Frame):
         elif self.eyes_state == 'blink':
             self.render_sleep(1)
         elif self.eyes_state == 'sleep':
-            self.render_sleep(1)
+            if not state.asleep:
+                self.eyes_state = 'open'
+            else:
+                self.render_sleep(1)
         elif self.eyes_state == 'dead':
             self.render_dead(1)
 
@@ -287,10 +293,10 @@ class Voice:
                      duty_cycle=20000,
                      occurrence=int(60*2/TIMESTEP))
         content = Mood(repeat_range=[1, 3],
-                     pitch_range=[300, 1000],
+                     pitch_range=[50, 60],
                      pitch_step=-1,
-                     step_speed=0.001,
-                     repeat_delay=0.5,
+                     step_speed=.1,
+                     repeat_delay=0.8,
                      duty_cycle=5000,
                      occurrence=int(60*5/TIMESTEP))
         depressed = Mood(repeat_range=[4, 7],
@@ -340,17 +346,22 @@ class Voice:
             else:
                 self.mood = 'depressed'
 
+    def generate_sounds(self):
+        for t in self.randomize_number(self.moods[self.mood].repeat_range):
+            self.buzzer_on()
+            for frequency in self.randomize_range(self.moods[self.mood].pitch_range, self.moods[self.mood].pitch_step):
+                self.buzzer.freq(frequency)
+                utime.sleep(self.moods[self.mood].step_speed)
+            self.buzzer_off()
+            utime.sleep(self.moods[self.mood].repeat_delay)
+
     def vocalize(self, state):
-        print(self.mood)
         self.update(state)
-        if (state.time % self.moods[self.mood].occurrence) == 0:
-            for t in self.randomize_number(self.moods[self.mood].repeat_range):
-                self.buzzer_on()
-                for frequency in self.randomize_range(self.moods[self.mood].pitch_range, self.moods[self.mood].pitch_step):
-                    self.buzzer.freq(frequency)
-                    utime.sleep(self.moods[self.mood].step_speed)
-                self.buzzer_off()
-                utime.sleep(self.moods[self.mood].repeat_delay)
+        if (state.env.sound or (state.time % self.moods[self.mood].occurrence) == 0) and not state.asleep:
+            # When not asleep, vocalize in response to sound or periodic occurrence
+            state.env.generating_sound = True
+            self.generate_sounds()
+            state.env.generating_sound = False
 
 
 class RgbColor:
@@ -402,15 +413,29 @@ class Nose:
         for i in range(3):
             self.rgb_led.append(RgbColor(gp + i))
         self.color_map = ColorMap()
+        self.brightness = 45
+        self.brightness_pulse_range = 20
+        self.brightness_pulsate = 0
+        self.brightness_pulsate_speed = 1
+        self.brightness_pulsate_on = False
+        self.rgb_to_color(self.set_brightness([0,0,0]))
 
     def diagnostics(self):
-        self.rgb_to_color([0,0,0])
+        for b in range(self.brightness):
+            self.brightness = b
+            self.rgb_to_color(self.set_brightness([0,255,0]))
+            utime.sleep(0.01)
+
         for deg in range(360):
             rad = 2 * math.pi * deg/360
             rgb = self.color_map.get_color(rad)
-            print(rgb)
             self.rgb_to_color(rgb)
-            utime.sleep(0.01)
+            utime.sleep(0.001)
+
+    def pulsate(self):
+        self.brightness_pulsate = self.brightness_pulsate + self.brightness_pulsate_speed
+        if self.brightness_pulsate > self.brightness_pulse_range or self.brightness_pulsate < 0:
+            self.brightness_pulsate_speed = self.brightness_pulsate_speed * -1
 
     def rgb_to_color(self, rgb):
         for i in range(3):
@@ -422,15 +447,48 @@ class Nose:
             angle += 2 * math.pi
         return angle
 
+    def set_brightness(self, rgb):
+        rgb_out = []
+        for c in rgb:
+            rgb_out.append(int(c*(self.brightness - self.brightness_pulsate)/100))
+        return rgb_out
+
     def cartesian_to_color(self, x, y):
         angle = self.cartesian_to_angle(x, y)
         rgb = self.color_map.get_color(angle)
-        self.rgb_to_color(rgb)
+        self.rgb_to_color(self.set_brightness(rgb))
 
     def update(self, state):
         # map to pos/neg coordinates: normalize to max/2
         x = state.happiness.value - int(state.happiness.max/2)
         y = state.arousal.value - int(state.arousal.max/2)
         self.cartesian_to_color(x, y)
+        if self.brightness_pulsate_on:
+            self.pulsate()
 
+class LightSensor:
+    def __init__(self, pin):
+        self.photo_resistor = machine.ADC(pin)
+        self.dark_threshold = 40000
+        self.value = 0
 
+    def diagnostics(self):
+        self.value = self.photo_resistor.read_u16()
+
+    def update(self, state):
+        self.value = self.photo_resistor.read_u16()
+        state.env.dark = self.value > self.dark_threshold
+
+class Ear:
+    def __init__(self, gp):
+        self.sound_detector = machine.Pin(gp, machine.Pin.IN)
+
+    def diagnostics(self):
+        if self.sound_detector.value() == 1:
+            print('Too Noisy')
+
+    def update(self, state):
+        if not state.env.generating_sound: # Necessary? Everything is serialized...
+            state.env.sound = self.sound_detector.value() == 1
+        else:
+            state.env.sound = False
